@@ -10,6 +10,7 @@ var InvalidArgumentError = require('../../../lib/errors/invalid-argument-error')
 var InvalidClientError = require('../../../lib/errors/invalid-client-error');
 var InvalidGrantError = require('../../../lib/errors/invalid-grant-error');
 var InvalidRequestError = require('../../../lib/errors/invalid-request-error');
+var Jwt = require('jsonwebtoken');
 var PasswordGrantType = require('../../../lib/grant-types/password-grant-type');
 var Promise = require('bluebird');
 var Request = require('../../../lib/request');
@@ -823,6 +824,68 @@ describe('TokenHandler integration', function() {
         return handler.handleGrantType(request, client)
           .then(function(data) {
             data.should.equal(token);
+          })
+          .catch(should.fail);
+      });
+    });
+
+    describe('with scope `openid`', function() {
+      it('should return a id token', function() {
+        var client = { id: 'foobar', grants: ['authorization_code'] };
+        var user = {
+          uid: 12345
+        };
+        var scope = 'openid';
+        var model = {
+          getAuthorizationCode: function() { return { 
+            authorizationCode: 12345, 
+            client: { id: 'foobar' }, 
+            expiresAt: new Date(new Date() * 2), 
+            user: user,
+            scope: scope,
+           }; },
+          getClient: function() {},
+          saveToken: function(token) {
+            return token; 
+          },
+          validateScope: function() { return scope; },
+          revokeAuthorizationCode: function() { return { authorizationCode: 12345, client: { id: 'foobar' }, expiresAt: new Date(new Date() / 2), user: user }; }
+        };
+        var handler = new TokenHandler({
+          accessTokenLifetime: 120,
+          model: model,
+          refreshTokenLifetime: 120,
+          openidAlgorithm: 'HS256',
+          openidIssuer: 'iss',
+          openidPrivateKey: 'key',
+        });
+        var request = new Request({
+          body: {
+            code: 12345,
+            grant_type: 'authorization_code',
+            scope: scope,
+          },
+          headers: {},
+          method: {},
+          query: {}
+        });
+
+        return handler.handleGrantType(request, client)
+          .then(function(data) {
+            should.exist(data.idToken);
+
+            let _scope = data.scope;
+            let payload = Jwt.decode(data.idToken);
+            should.exist(payload.iss);
+            should.exist(payload.sub);
+            should.exist(payload.aud);
+            should.exist(payload.iat);
+            should.exist(payload.exp);
+
+            user.uid.should.equal(+payload.sub);
+            client.id.should.equal(payload.aud);
+
+            scope.should.equal(_scope);
           })
           .catch(should.fail);
       });

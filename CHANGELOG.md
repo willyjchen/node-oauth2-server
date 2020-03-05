@@ -1,5 +1,9 @@
 ## Changelog
 
+### 3.0.0-mydev.1
+* Add OpenID Connect (OIDC) "Authorization Code Flow" support. see https://openid.net/specs/openid-connect-core-1_0.html#CodeFlowAuth
+* Add OpenID Connect (OIDC) "Implicit Flow" support. see https://openid.net/specs/openid-connect-core-1_0.html#ImplicitFlowAuth
+
 ### 3.0.0
 * Complete re-write, with Promises and callback support
 * Dropped support for node v0.8, v0.10, v0.12

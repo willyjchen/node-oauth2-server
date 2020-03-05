@@ -20,6 +20,7 @@ var ServerError = require('../../../lib/errors/server-error');
 var UnauthorizedClientError = require('../../../lib/errors/unauthorized-client-error');
 var should = require('should');
 var url = require('url');
+var jwt = require('jsonwebtoken');
 
 /**
  * Test `AuthorizeHandler` integration.
@@ -289,6 +290,75 @@ describe('AuthorizeHandler integration', function() {
       return handler.handle(request, response)
         .then(function() {
           response.get('location').should.equal('http://example.com/cb?code=12345&state=foobar');
+        })
+        .catch(should.fail);
+    });
+
+    it('should redirect to a successful response with `id_token` and `state` if successful', function () {
+      var client = {
+        grants: ['authorization_code'],
+        redirectUris: ['http://example.com/cb'],
+        id: '12345'
+      };
+      var user = {
+        uid: 123
+      };
+      var model = {
+        getAccessToken: function () {
+          return {
+            client: client,
+            user: user,
+            accessTokenExpiresAt: new Date(new Date().getTime() + 10000)
+          };
+        },
+        getClient: function () {
+          return client;
+        },
+        saveAuthorizationCode: function () {
+          return { authorizationCode: 12345, client: client };
+        }
+      };
+      var handler = new AuthorizeHandler({
+        authorizationCodeLifetime: 120,
+        model: model,
+        openidAlgorithm: 'HS256',
+        openidIssuer: 'iss',
+        openidPrivateKey: 'key',
+        authenticateHandler: {
+          handle: function () {
+            return user;
+          }
+        },
+      });
+      var request = new Request({
+        body: {
+          client_id: 12345,
+          response_type: 'id_token'
+        },
+        headers: {
+          'Authorization': 'Bearer foo'
+        },
+        method: {},
+        query: {
+          state: 'foobar'
+        }
+      });
+      var response = new Response({ body: {}, headers: {} });
+
+      return handler.handle(request, response)
+        .then(function () {
+          let location = response.get('location');
+          let id_token = url.parse(location, true).query.id_token;
+          let payload = jwt.decode(id_token);
+
+          should.exist(payload.iss);
+          should.exist(payload.sub);
+          should.exist(payload.aud);
+          should.exist(payload.iat);
+          should.exist(payload.exp);
+
+          should.equal(+payload.sub, user.uid);
+          should.equal(payload.aud, client.id);
         })
         .catch(should.fail);
     });
@@ -820,6 +890,91 @@ describe('AuthorizeHandler integration', function() {
         var request = new Request({ body: {}, headers: {}, method: {}, query: { scope: 'foo' } });
 
         handler.getScope(request).should.equal('foo');
+      });
+    });
+  });
+
+  describe('getNonce()', function() {
+    it('should throw an error if `allowEmptyNonce` is false and `nonce` is missing', function() {
+      var model = {
+        getAccessToken: function() {},
+        getClient: function() {},
+        saveAuthorizationCode: function() {}
+      };
+      var handler = new AuthorizeHandler({ allowEmptyNonce: false, authorizationCodeLifetime: 120, model: model });
+      var request = new Request({ body: {}, headers: {}, method: {}, query: {} });
+
+      try {
+        handler.getNonce(request);
+
+        should.fail();
+      } catch (e) {
+        e.should.be.an.instanceOf(InvalidRequestError);
+        e.message.should.equal('Missing parameter: `nonce`');
+      }
+    });
+
+    it('should return null if `allowEmptyNonce` is true and `nonce` is missing', function () {
+      var model = {
+        getAccessToken: function () { },
+        getClient: function () { },
+        saveAuthorizationCode: function () { }
+      };
+      var handler = new AuthorizeHandler({ allowEmptyNonce: true, authorizationCodeLifetime: 120, model: model });
+      var request = new Request({ body: {}, headers: {}, method: {}, query: {} });
+
+      try {
+        let nonce = handler.getNonce(request);
+
+        should.equal(nonce, null);
+      } catch (e) {
+
+      }
+    });
+
+    it('should return null if `allowEmptyNonce` is empty and `nonce` is missing', function () {
+      var model = {
+        getAccessToken: function () { },
+        getClient: function () { },
+        saveAuthorizationCode: function () { }
+      };
+      var handler = new AuthorizeHandler({ authorizationCodeLifetime: 120, model: model });
+      var request = new Request({ body: {}, headers: {}, method: {}, query: {} });
+
+      try {
+        let nonce = handler.getNonce(request);
+
+        should.equal(nonce, null);
+      } catch (e) {
+
+      }
+    });
+
+    describe('with `nonce` in the request body', function () {
+      it('should return the nonce', function () {
+        var model = {
+          getAccessToken: function () { },
+          getClient: function () { },
+          saveAuthorizationCode: function () { }
+        };
+        var handler = new AuthorizeHandler({ authorizationCodeLifetime: 120, model: model });
+        var request = new Request({ body: { nonce: 'foobar' }, headers: {}, method: {}, query: {} });
+
+        handler.getNonce(request).should.equal('foobar');
+      });
+    });
+
+    describe('with `nonce` in the request query', function () {
+      it('should return the nonce', function () {
+        var model = {
+          getAccessToken: function () { },
+          getClient: function () { },
+          saveAuthorizationCode: function () { }
+        };
+        var handler = new AuthorizeHandler({ authorizationCodeLifetime: 120, model: model });
+        var request = new Request({ body: {}, headers: {}, method: {}, query: { nonce: 'foobar' } });
+
+        handler.getNonce(request).should.equal('foobar');
       });
     });
   });
